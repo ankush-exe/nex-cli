@@ -1,0 +1,25 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nex-cli"
+version = "0.1.0"
+description = "A command-line interface for Nex."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+authors = [{ name = "Nex contributors" }]
+dependencies = ["rich>=13", "typer>=0.12"]
+
+[project.optional-dependencies]
+dev = ["pytest>=7"]
+
+[project.scripts]
+nex = "nex.cli:run"
+
+[tool.hatch.build.targets.wheel]
+packages = ["nex"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

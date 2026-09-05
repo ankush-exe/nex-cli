@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nex-cli"
-version = "0.2.0"
+version = "0.2.1"
 description = "A command-line interface for Nex."
 readme = "README.md"
 requires-python = ">=3.12"

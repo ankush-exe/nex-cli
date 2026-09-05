@@ -19,7 +19,7 @@ def test_version() -> None:
     result = runner.invoke(app, ["--version"])
 
     assert result.exit_code == 0
-    assert result.output == "nex 0.1.0\n"
+    assert result.output == "nex 0.2.0\n"
 
 
 def test_no_arguments_shows_help() -> None:

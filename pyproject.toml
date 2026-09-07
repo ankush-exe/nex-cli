@@ -8,7 +8,7 @@ version = "0.2.1"
 description = "A command-line interface for Nex."
 readme = "README.md"
 requires-python = ">=3.12"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "Nex contributors" }]
 dependencies = ["rich>=13", "typer>=0.12"]
 

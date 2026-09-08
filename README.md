@@ -63,3 +63,7 @@ full terms.
 The `v0.1.0`, `v0.2.0`, and `v0.2.1` release tags and their distributed
 artifacts remain available under their original MIT licenses. This change does
 not revoke permissions already granted under those licenses.
+
+---
+
+© 2026 Ankush Thakur. All rights reserved.

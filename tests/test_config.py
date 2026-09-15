@@ -8,12 +8,12 @@ from nex.config import (
     build_learn_config,
     write_learn_config,
 )
-from nex.detection import detect_project
+from nex.discovery import discover_project
 
 
 def test_writes_config_for_a_fresh_project_directory(tmp_path) -> None:
     (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
-    config = build_learn_config(tmp_path, detect_project(tmp_path))
+    config = build_learn_config(tmp_path, discover_project(tmp_path))
 
     config_path = write_learn_config(config)
 
@@ -25,7 +25,7 @@ def test_does_not_clobber_an_existing_config(tmp_path) -> None:
     config_path = tmp_path / ".nex" / "config.toml"
     config_path.parent.mkdir()
     config_path.write_text("keep = true\n", encoding="utf-8")
-    config = build_learn_config(tmp_path, detect_project(tmp_path))
+    config = build_learn_config(tmp_path, discover_project(tmp_path))
 
     with pytest.raises(ConfigAlreadyExistsError):
         write_learn_config(config)
@@ -38,14 +38,14 @@ def test_force_overwrites_an_existing_config(tmp_path) -> None:
     config_path.parent.mkdir()
     config_path.write_text("old = true\n", encoding="utf-8")
     (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
-    config = build_learn_config(tmp_path, detect_project(tmp_path))
+    config = build_learn_config(tmp_path, discover_project(tmp_path))
 
     write_learn_config(config, force=True)
 
     assert "old = true" not in config_path.read_text(encoding="utf-8")
-    assert tomllib.loads(config_path.read_text(encoding="utf-8"))["backend"] == {
-        "signals": ["requirements.txt"]
-    }
+    content = tomllib.loads(config_path.read_text(encoding="utf-8"))
+    assert content["schema_version"] == 2
+    assert content["components"][0]["signals"] == ["requirements.txt"]
 
 
 def test_config_content_captures_a_mixed_project(tmp_path) -> None:
@@ -56,18 +56,58 @@ def test_config_content_captures_a_mixed_project(tmp_path) -> None:
     (tmp_path / "docker-compose.yml").write_text("services: {}\n", encoding="utf-8")
 
     config_path = write_learn_config(
-        build_learn_config(tmp_path, detect_project(tmp_path))
+        build_learn_config(tmp_path, discover_project(tmp_path))
     )
     content = tomllib.loads(config_path.read_text(encoding="utf-8"))
 
-    assert content == {
-        "schema_version": 1,
-        "project": {"name": tmp_path.name, "root": str(tmp_path.resolve())},
-        "frontend": {
-            "detected": True,
-            "script": "start",
-            "command": "npm run start",
-        },
-        "backend": {"signals": ["pyproject.toml"]},
-        "services": {"docker_compose": True},
+    assert content["schema_version"] == 2
+    assert content["project"] == {
+        "name": tmp_path.name,
+        "root": str(tmp_path.resolve()),
     }
+    assert content["components"][0]["path"] == "."
+    assert content["components"][0]["signals"] == [
+        "package.json",
+        "pyproject.toml",
+        "docker-compose.yml",
+    ]
+    assert content["components"][0]["workflows"][0]["scripts"] == ["start"]
+
+
+def test_force_replaces_an_old_schema_only_when_requested(tmp_path) -> None:
+    config_path = tmp_path / ".nex" / "config.toml"
+    config_path.parent.mkdir()
+    config_path.write_text("schema_version = 1\n", encoding="utf-8")
+    (tmp_path / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    config = build_learn_config(tmp_path, discover_project(tmp_path))
+    with pytest.raises(ConfigAlreadyExistsError):
+        write_learn_config(config)
+    assert tomllib.loads(config_path.read_text(encoding="utf-8"))["schema_version"] == 1
+
+    write_learn_config(config, force=True)
+    assert tomllib.loads(config_path.read_text(encoding="utf-8"))["schema_version"] == 2
+
+
+def test_config_records_multiple_components(tmp_path) -> None:
+    client = tmp_path / "client"
+    server = tmp_path / "server"
+    client.mkdir()
+    server.mkdir()
+    (client / "package.json").write_text(
+        '{"scripts": {"dev": "vite"}}', encoding="utf-8"
+    )
+    (server / "requirements.txt").write_text("fastapi\n", encoding="utf-8")
+
+    config_path = write_learn_config(
+        build_learn_config(tmp_path, discover_project(tmp_path))
+    )
+    content = tomllib.loads(config_path.read_text(encoding="utf-8"))
+
+    assert [component["path"] for component in content["components"]] == [
+        "client",
+        "server",
+    ]
+    assert content["components"][0]["workflows"][0]["suggested_commands"] == [
+        "npm run dev"
+    ]

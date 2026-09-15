@@ -22,11 +22,13 @@ def test_version() -> None:
     assert result.output == "nex 0.2.1\n"
 
 
-def test_no_arguments_shows_help() -> None:
+def test_no_arguments_requires_config(tmp_path, monkeypatch) -> None:
+    monkeypatch.chdir(tmp_path)
+
     result = runner.invoke(app)
 
-    assert result.exit_code == 0
-    assert "Usage:" in result.output
+    assert result.exit_code == 1
+    assert "Run `nex learn` first" in result.output
 
 
 def test_learn_reports_detected_project_signals(tmp_path, monkeypatch) -> None:
@@ -39,11 +41,29 @@ def test_learn_reports_detected_project_signals(tmp_path, monkeypatch) -> None:
     result = runner.invoke(app, ["learn"])
 
     assert result.exit_code == 0
-    assert "Frontend" in result.output
-    assert "package.json (dev)" in result.output
-    assert "Python backend" in result.output
+    assert "package.json" in result.output
+    assert "javascript" in result.output
+    assert "python" in result.output
+    assert "dev" in result.output
     assert "Saved Nex config to" in result.output
     assert (tmp_path / ".nex" / "config.toml").is_file()
+
+
+def test_learn_discovers_nested_components_and_warnings(tmp_path, monkeypatch) -> None:
+    client = tmp_path / "client"
+    server = tmp_path / "server"
+    client.mkdir()
+    server.mkdir()
+    (client / "package.json").write_text('{"scripts": {"dev": "vite"}}', encoding="utf-8")
+    (server / "package.json").write_text("{", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["learn"])
+
+    assert result.exit_code == 0
+    assert "client" in result.output
+    assert "server" in result.output
+    assert "Warning:" in result.output
 
 
 def test_learn_refuses_to_overwrite_existing_config(tmp_path, monkeypatch) -> None:

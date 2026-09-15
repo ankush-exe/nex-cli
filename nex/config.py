@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from nex.detection import ProjectDetection
+from nex.discovery.models import ProjectDiscovery
 
 
 CONFIG_DIRECTORY = ".nex"
@@ -19,26 +19,60 @@ class ConfigAlreadyExistsError(FileExistsError):
 
 @dataclass(frozen=True)
 class LearnConfig:
-    """The stable, persisted representation of a detection result."""
+    """The stable, persisted representation of a discovery result."""
 
     root: Path
-    frontend_script: str | None
-    backend_signals: tuple[str, ...]
-    docker_compose: bool
+    components: tuple[ComponentConfig, ...]
 
 
-def build_learn_config(root: Path, detection: ProjectDetection) -> LearnConfig:
-    """Convert a project detection result into Nex's persisted configuration."""
-    frontend_script = None
-    if detection.frontend and detection.frontend.scripts:
-        frontend_script = detection.frontend.scripts[0]
+@dataclass(frozen=True)
+class ComponentConfig:
+    """The serializable representation of one discovered component."""
 
-    return LearnConfig(
-        root=root.resolve(),
-        frontend_script=frontend_script,
-        backend_signals=detection.python_files,
-        docker_compose=detection.docker_compose,
+    name: str
+    path: str
+    role: str
+    signals: tuple[str, ...]
+    workflows: tuple[WorkflowConfig, ...]
+    warnings: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class WorkflowConfig:
+    """The serializable representation of one component workflow."""
+
+    ecosystem: str
+    manifest: str
+    package_manager: str | None
+    scripts: tuple[str, ...]
+    metadata: tuple[tuple[str, str], ...]
+    suggested_commands: tuple[str, ...]
+
+
+def build_learn_config(root: Path, discovery: ProjectDiscovery) -> LearnConfig:
+    """Convert a project discovery result into Nex's persisted configuration."""
+    components = tuple(
+        ComponentConfig(
+            name=component.name,
+            path=component.relative_path.as_posix(),
+            role=component.role,
+            signals=tuple(signal.name for signal in component.signals),
+            workflows=tuple(
+                WorkflowConfig(
+                    ecosystem=workflow.ecosystem,
+                    manifest=workflow.manifest,
+                    package_manager=workflow.package_manager,
+                    scripts=workflow.scripts,
+                    metadata=workflow.metadata,
+                    suggested_commands=workflow.suggested_commands,
+                )
+                for workflow in component.workflows
+            ),
+            warnings=component.warnings,
+        )
+        for component in discovery.components
     )
+    return LearnConfig(root=root.resolve(), components=components)
 
 
 def write_learn_config(config: LearnConfig, *, force: bool = False) -> Path:
@@ -53,36 +87,50 @@ def write_learn_config(config: LearnConfig, *, force: bool = False) -> Path:
 
 
 def render_learn_config(config: LearnConfig) -> str:
-    """Render the fixed v1 configuration schema as TOML."""
+    """Render the v2 multi-component configuration schema as TOML."""
     lines = [
-        "schema_version = 1",
+        "schema_version = 2",
         "",
         "[project]",
         f"name = {_toml_string(config.root.name)}",
         f"root = {_toml_string(str(config.root))}",
-        "",
-        "[frontend]",
-        f"detected = {'true' if config.frontend_script is not None else 'false'}",
     ]
-    if config.frontend_script is not None:
+    for component in config.components:
         lines.extend(
             (
-                f"script = {_toml_string(config.frontend_script)}",
-                f"command = {_toml_string(f'npm run {config.frontend_script}')}",
+                "",
+                "[[components]]",
+                f"name = {_toml_string(component.name)}",
+                f"path = {_toml_string(component.path)}",
+                f"role = {_toml_string(component.role)}",
+                f"signals = {_toml_string_array(component.signals)}",
             )
         )
+        for workflow in component.workflows:
+            lines.extend(
+                (
+                    "",
+                    "[[components.workflows]]",
+                    f"ecosystem = {_toml_string(workflow.ecosystem)}",
+                    f"manifest = {_toml_string(workflow.manifest)}",
+                )
+            )
+            if workflow.package_manager is not None:
+                lines.append(
+                    f"package_manager = {_toml_string(workflow.package_manager)}"
+                )
+            lines.append(f"scripts = {_toml_string_array(workflow.scripts)}")
+            lines.append(
+                f"suggested_commands = {_toml_string_array(workflow.suggested_commands)}"
+            )
+            if workflow.metadata:
+                lines.append("[components.workflows.metadata]")
+                for key, value in workflow.metadata:
+                    lines.append(f"{_toml_key(key)} = {_toml_string(value)}")
+        if component.warnings:
+            lines.append(f"warnings = {_toml_string_array(component.warnings)}")
 
-    lines.extend(
-        (
-            "",
-            "[backend]",
-            f"signals = {_toml_string_array(config.backend_signals)}",
-            "",
-            "[services]",
-            f"docker_compose = {'true' if config.docker_compose else 'false'}",
-            "",
-        )
-    )
+    lines.append("")
     return "\n".join(lines)
 
 
@@ -93,3 +141,7 @@ def _toml_string(value: str) -> str:
 
 def _toml_string_array(values: tuple[str, ...]) -> str:
     return f"[{', '.join(_toml_string(value) for value in values)}]"
+
+
+def _toml_key(value: str) -> str:
+    return value if value.replace("-", "").replace("_", "").isalnum() else _toml_string(value)

@@ -11,7 +11,7 @@ pipx install nex-cli
 nex --version
 ```
 
-The current release reports `nex 0.2.1`.
+The current release reports `nex 0.3.1`.
 
 ## Development
 

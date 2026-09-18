@@ -2,7 +2,7 @@ import json
 import shlex
 import subprocess
 import sys
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 import pytest
 
@@ -104,7 +104,7 @@ suggested_commands = ["missing-nex-command"]
         run_configured_workflow(tmp_path)
 
 
-def test_multiple_runnable_components_require_selection(tmp_path) -> None:
+def test_multiple_runnable_components_run_automatically(tmp_path) -> None:
     write_config(
         tmp_path,
         """
@@ -122,8 +122,23 @@ suggested_commands = ["npm run dev"]
 """,
     )
 
-    with pytest.raises(WorkflowConfigError, match="--component"):
-        run_configured_workflow(tmp_path)
+    first_process = Mock()
+    first_process.wait.return_value = 0
+    second_process = Mock()
+    second_process.wait.return_value = 0
+
+    with patch(
+        "nex.execution.subprocess.Popen",
+        side_effect=[first_process, second_process],
+    ) as popen:
+        assert run_configured_workflow(tmp_path) == 0
+
+    assert popen.call_args_list == [
+        call(("npm", "run", "dev"), cwd=tmp_path / "client"),
+        call(("npm", "run", "dev"), cwd=tmp_path / "admin"),
+    ]
+    first_process.wait.assert_called_once_with()
+    second_process.wait.assert_called_once_with()
 
 
 def test_component_selection_runs_only_requested_workflow(tmp_path) -> None:
@@ -151,6 +166,29 @@ suggested_commands = ["npm run start"]
 
     assert result == 0
     popen.assert_called_once_with(("npm", "run", "start"), cwd=tmp_path / "admin")
+
+
+def test_component_selection_accepts_component_name(tmp_path) -> None:
+    component = tmp_path / "apps" / "client"
+    component.mkdir(parents=True)
+    write_config(
+        tmp_path,
+        '''schema_version = 2
+
+[[components]]
+name = "client"
+path = "apps/client"
+[[components.workflows]]
+suggested_commands = ["npm run dev"]
+''',
+    )
+    process = Mock()
+    process.wait.return_value = 0
+
+    with patch("nex.execution.subprocess.Popen", return_value=process) as popen:
+        assert run_configured_workflow(tmp_path, "client") == 0
+
+    popen.assert_called_once_with(("npm", "run", "dev"), cwd=component)
 
 
 @pytest.mark.parametrize("component_path", ["../outside", "client/../../outside"])

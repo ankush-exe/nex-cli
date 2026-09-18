@@ -33,8 +33,8 @@ On Windows, activate the environment with `.venv\\Scripts\\activate` instead.
 
 ```bash
 nex learn                    # Discover the project and save workflow configuration
-nex                         # Execute the saved workflow when one component is runnable
-nex --component client      # Execute the workflow for the client component
+nex                         # Execute all saved workflows
+nex --component client      # Execute only the workflow for the client component
 nex learn --force           # Replace an existing Nex config
 nex --help
 nex --version
@@ -49,9 +49,8 @@ nex learn
 nex
 ```
 
-Bare `nex` reads the saved configuration and executes the workflow when exactly
-one runnable component exists. If discovery finds multiple runnable components,
-bare `nex` asks you to select one by its relative path:
+Bare `nex` reads the saved configuration and executes every runnable component.
+To run only one component, pass its relative path:
 
 ```bash
 nex --component client
@@ -79,14 +78,14 @@ refuses to replace an existing config unless you pass `--force`; this leaves
 older v0.2.x schema version 1 files untouched until the user explicitly
 chooses to replace them.
 
-Nex v0.3.0 executes one workflow command at a time. It does not configure
-environments, orchestrate multiple services, or supervise process trees. When
+Nex executes one workflow command per component. It does not configure
+environments or supervise process trees. When
 one component exposes more than one suggestion, Nex runs its first deterministic
 suggestion (`dev` before `start`).
 
 ## Not yet
 
-- Multi-service orchestration and process supervision
+- Process supervision
 - Automatic workflow detection beyond the reported file signals
 - Dependency installation
 

@@ -41,7 +41,7 @@ def main(
     component: str | None = typer.Option(
         None,
         "--component",
-        help="Select one component path when multiple workflows are available.",
+        help="Select one component name or path instead of running all workflows.",
     ),
 ) -> None:
     """Nex command-line interface."""

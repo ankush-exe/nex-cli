@@ -1,4 +1,4 @@
-"""Execution of one workflow selected from a saved Nex config."""
+"""Execution of workflows selected from a saved Nex config."""
 
 from __future__ import annotations
 
@@ -16,6 +16,7 @@ class ExecutionTarget:
     """One command and working directory that Nex can execute."""
 
     component_path: str
+    component_name: str
     command: tuple[str, ...]
     cwd: Path
 
@@ -25,7 +26,7 @@ class WorkflowConfigError(ValueError):
 
 
 def run_configured_workflow(root: Path, component: str | None = None) -> int:
-    """Run one configured workflow and return its process exit code."""
+    """Run configured workflows and return a process exit code."""
     root = root.resolve()
     config_path = root / CONFIG_DIRECTORY / CONFIG_FILENAME
     if not config_path.is_file():
@@ -33,30 +34,38 @@ def run_configured_workflow(root: Path, component: str | None = None) -> int:
             "No Nex config found. Run `nex learn` first, then run `nex` again."
         )
 
-    targets = _read_targets(config_path, root)
+    targets_all = _read_targets(config_path, root)
+    targets = targets_all
     if component is not None:
         normalized_component = _normalize_component_path(component, root)
         targets = tuple(
             target for target in targets if target.component_path == normalized_component
         )
         if not targets:
+            targets = tuple(
+                target
+                for target in targets_all
+                if target.component_name == component
+            )
+        if len(targets) > 1:
+            choices = ", ".join(target.component_path for target in targets)
+            raise WorkflowConfigError(
+                f"Multiple runnable components match '{component}' ({choices}). "
+                "Choose one with `nex --component <path>`."
+            )
+        if not targets:
             raise WorkflowConfigError(
                 f"No runnable workflow found for component '{component}'."
             )
-    elif len(targets) > 1:
-        choices = ", ".join(target.component_path for target in targets)
-        raise WorkflowConfigError(
-            f"Multiple runnable components found ({choices}). "
-            "Choose one with `nex --component <path>`."
-        )
-
     if not targets:
         raise WorkflowConfigError(
             "No runnable workflow found in the Nex config. Run `nex learn --force` "
             "after adding a supported dev or start script."
         )
 
-    return _run_process(targets[0])
+    if component is not None or len(targets) == 1:
+        return _run_process(targets[0])
+    return _run_processes(targets)
 
 
 def _read_targets(config_path: Path, root: Path) -> tuple[ExecutionTarget, ...]:
@@ -83,7 +92,7 @@ def _read_v1_targets(data: dict, root: Path) -> tuple[ExecutionTarget, ...]:
     command = frontend.get("command")
     if not isinstance(command, str) or not command.strip():
         return ()
-    return (ExecutionTarget(".", _parse_command(command), root),)
+    return (ExecutionTarget(".", root.name, _parse_command(command), root),)
 
 
 def _read_v2_targets(data: dict, root: Path) -> tuple[ExecutionTarget, ...]:
@@ -97,10 +106,13 @@ def _read_v2_targets(data: dict, root: Path) -> tuple[ExecutionTarget, ...]:
         if not isinstance(component, dict):
             continue
         component_path = component.get("path")
+        component_name = component.get("name")
         workflows = component.get("workflows", [])
         if not isinstance(component_path, str) or not isinstance(workflows, list):
             continue
         normalized_path, component_directory = _validated_component_path(component_path, root)
+        if not isinstance(component_name, str) or not component_name:
+            component_name = root.name if normalized_path == "." else Path(normalized_path).name
         if normalized_path in normalized_paths:
             raise WorkflowConfigError(
                 f"Nex config has duplicate component path '{normalized_path}'."
@@ -118,6 +130,7 @@ def _read_v2_targets(data: dict, root: Path) -> tuple[ExecutionTarget, ...]:
                     continue
                 target = ExecutionTarget(
                     normalized_path,
+                    component_name,
                     _parse_command(command),
                     component_directory,
                 )
@@ -194,3 +207,41 @@ def _run_process(target: ExecutionTarget) -> int:
                 pass
         return 130
     return 130 if returncode == -2 else returncode
+
+
+def _run_processes(targets: tuple[ExecutionTarget, ...]) -> int:
+    """Run all targets concurrently and return the first non-zero exit code."""
+    processes: list[subprocess.Popen] = []
+    try:
+        for target in targets:
+            try:
+                processes.append(subprocess.Popen(target.command, cwd=target.cwd))
+            except (OSError, ValueError) as error:
+                for process in processes:
+                    process.terminate()
+                command = shlex.join(target.command)
+                raise WorkflowConfigError(
+                    f"Could not start workflow `{command}` in {target.cwd}: {error}"
+                ) from None
+
+        exit_codes = [process.wait() for process in processes]
+    except KeyboardInterrupt:
+        for process in processes:
+            try:
+                process.terminate()
+            except ProcessLookupError:
+                pass
+        for process in processes:
+            try:
+                process.wait(timeout=5)
+            except (subprocess.TimeoutExpired, ProcessLookupError):
+                try:
+                    process.kill()
+                except ProcessLookupError:
+                    pass
+        return 130
+
+    return next(
+        (130 if code == -2 else code for code in exit_codes if code != 0),
+        0,
+    )
